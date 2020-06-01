@@ -3,7 +3,7 @@
 
 from __future__ import print_function, division
 from subprocess import Popen, PIPE
-
+import traceback
 import collectd
 import sys
 import os
@@ -42,6 +42,9 @@ CONVERTERS = {
 
 	# This is a little ugly. Not sure if there is any legit use for this.
 	'identity': lambda x: x,
+
+	# Supported or Not
+	'supported': lambda x: x if x.isdigit() else 0,
 }
 
 QUERY_CONVERTERS = {
@@ -69,6 +72,8 @@ QUERY_CONVERTERS = {
 	'power.management': CONVERTERS['enabled'],
 
 	'pstate': CONVERTERS['pstate'],
+	
+	'fan.speed': CONVERTERS['supported'],
 }
 
 # Assume type 'gauge' as default, but use other specific types when fit.
@@ -149,11 +154,17 @@ def nvidia_smi_query_gpu(bin_path, query_list, converters_dict, id_query='pci.bu
 		id_converter: Function used to convert the result from `id_query`. May be `None`.
 	"""
 
-	query_string = '--query-gpu={},'.format(id_query) + ','.join(query_list)
+	query_string = '--query-gpu={},'.format(id_query) + 'name,' + ','.join(query_list)
 	cmd_list = [bin_path, query_string, '--format=csv,noheader,nounits']
-	process = Popen(cmd_list, stdout=PIPE)
-	output, err = process.communicate()
-
+	info(cmd_list)
+	try:	
+		process = Popen(cmd_list, stdout=PIPE)
+		output, err = process.communicate()
+	except Exception as e:
+		info(e)
+		info(traceback.format_exc())
+		
+	
 	if process.returncode != 0:
 		error_exit('{} exited with error code "{}".'.format(bin_path, process.returncode))
 
@@ -169,20 +180,23 @@ def nvidia_smi_query_gpu(bin_path, query_list, converters_dict, id_query='pci.bu
 	result = {}
 	for line in output.decode().strip().split('\n'):
 		values = re.split(r'\s*,\s*', line)
-
 		# Grab GPU ID.
 		gpu_id = values.pop(0)
+		# Grab GPU Name.
+		gpu_name = values.pop(0)
 		if id_converter is not None:
 			gpu_id = CONVERTERS[id_converter](gpu_id)
-
+		
 		# Convert whatever needs to be converted.
 		for query in converters_dict:
 			converter_func = converters_dict[query]
 			idx = query_list.index(query)
+			info(values[idx])
 			values[idx] = converter_func(values[idx])
 
 		result[gpu_id] = {
 			'values': values,
+			'gpu_name': gpu_name.replace(" ", "_"),
 		}
 
 	return result
@@ -196,13 +210,19 @@ def cb_read(data=None):
 
 	vl = collectd.Values()
 	for gpu_id in readings:
+		gpu_name = str(gpu_id)+"_"+readings[gpu_id]['gpu_name']
 		for query_name, value, type_ in zip(_CONFIG['new_names_list'], readings[gpu_id]['values'], _CONFIG['type_list']):
+		  try:
 			vl.dispatch(
 				plugin=_PLUGIN_NAME,
-				plugin_instance=gpu_id,
+				plugin_instance=gpu_name,
 				type=type_,
 				type_instance=query_name,
 				values=[value],
 			)
+	          except Exception as e:
+          	  	info(e)
+                	info(traceback.format_exc())
+
 
 collectd.register_config(cb_config)
