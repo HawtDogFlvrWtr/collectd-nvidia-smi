@@ -156,7 +156,6 @@ def nvidia_smi_query_gpu(bin_path, query_list, converters_dict, id_query='pci.bu
 
 	query_string = '--query-gpu={},'.format(id_query) + 'name,' + ','.join(query_list)
 	cmd_list = [bin_path, query_string, '--format=csv,noheader,nounits']
-	info(cmd_list)
 	try:	
 		process = Popen(cmd_list, stdout=PIPE)
 		output, err = process.communicate()
@@ -191,7 +190,6 @@ def nvidia_smi_query_gpu(bin_path, query_list, converters_dict, id_query='pci.bu
 		for query in converters_dict:
 			converter_func = converters_dict[query]
 			idx = query_list.index(query)
-			info(values[idx])
 			values[idx] = converter_func(values[idx])
 
 		result[gpu_id] = {
